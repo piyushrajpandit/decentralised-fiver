@@ -4,6 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "dev": "npx tsx watch src/index.ts",
+    "seed": "npx tsx seed-demo-task.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

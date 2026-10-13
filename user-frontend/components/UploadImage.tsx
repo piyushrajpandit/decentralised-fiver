@@ -1,11 +1,10 @@
-"use client"
-import { BACKEND_URL, CLOUDFRONT_URL } from "@/utils";
-import axios from "axios";
-import { useState } from "react"
+"use client";
+import { useState } from "react";
 
-export function UploadImage({ onImageAdded, image }: {
+export function UploadImage({ onImageAdded, image, onImageRemoved }: {
     onImageAdded: (image: string) => void;
     image?: string;
+    onImageRemoved?: () => void;
 }) {
     const [uploading, setUploading] = useState(false);
 
@@ -13,46 +12,75 @@ export function UploadImage({ onImageAdded, image }: {
         setUploading(true);
         try {
             const file = e.target.files[0];
-            const response = await axios.get(`${BACKEND_URL}/v1/user/presignedUrl`, {
-                headers: {
-                    "Authorization": localStorage.getItem("token")
-                }
-            });
-            const presignedUrl = response.data.preSignedUrl;
-            const formData = new FormData();
-            formData.set("bucket", response.data.fields["bucket"])
-            formData.set("X-Amz-Algorithm", response.data.fields["X-Amz-Algorithm"]);
-            formData.set("X-Amz-Credential", response.data.fields["X-Amz-Credential"]);
-            formData.set("X-Amz-Algorithm", response.data.fields["X-Amz-Algorithm"]);
-            formData.set("X-Amz-Date", response.data.fields["X-Amz-Date"]);
-            formData.set("key", response.data.fields["key"]);
-            formData.set("Policy", response.data.fields["Policy"]);
-            formData.set("X-Amz-Signature", response.data.fields["X-Amz-Signature"]);
-            formData.set("X-Amz-Algorithm", response.data.fields["X-Amz-Algorithm"]);
-            formData.append("file", file);
-            const awsResponse = await axios.post(presignedUrl, formData);
+            if (!file) {
+                setUploading(false);
+                return;
+            }
 
-            onImageAdded(`${CLOUDFRONT_URL}/${response.data.fields["key"]}`);
-        } catch(e) {
-            console.log(e)
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                const base64 = reader.result as string;
+                onImageAdded(base64);
+                setUploading(false);
+            };
+            reader.onerror = () => setUploading(false);
+            reader.readAsDataURL(file);
+        } catch (e) {
+            console.error(e);
+            setUploading(false);
         }
-        setUploading(false);
     }
 
     if (image) {
-        return <img className={"p-2 w-96 rounded"} src={image} />
+        return (
+            <div className="relative group w-48 h-48 sm:w-56 sm:h-56 rounded-xl overflow-hidden border border-slate-700/80 bg-slate-900">
+                <img
+                    className="w-full h-full object-cover"
+                    src={image}
+                    alt="Task option"
+                />
+                {onImageRemoved && (
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                        <button
+                            type="button"
+                            onClick={onImageRemoved}
+                            className="px-3 py-1.5 rounded-lg bg-red-600/90 hover:bg-red-600 text-white text-xs font-medium transition shadow-sm"
+                        >
+                            Remove
+                        </button>
+                    </div>
+                )}
+            </div>
+        );
     }
 
-    return <div>
-        <div className="w-40 h-40 rounded border text-2xl cursor-pointer">
-                <div className="h-full flex justify-center flex-col relative w-full">
-                    <div className="h-full flex justify-center w-full pt-16 text-4xl">
-                    {uploading ? <div className="text-sm">Loading...</div> : <>
-                        +
-                        <input className="w-full h-full bg-red-400 w-40 h-40" type="file" style={{position: "absolute", opacity: 0, top: 0, left: 0, bottom: 0, right: 0, width: "100%", height: "100%"}} onChange={onFileSelect} />
-                    </>}
+    return (
+        <div className="w-48 h-48 sm:w-56 sm:h-56 rounded-xl border border-dashed border-slate-700 hover:border-slate-500 bg-slate-900/40 hover:bg-slate-900/80 transition relative cursor-pointer flex flex-col items-center justify-center text-center p-4">
+            <input
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                type="file"
+                accept="image/*"
+                onChange={onFileSelect}
+                disabled={uploading}
+            />
+            {uploading ? (
+                <div className="flex flex-col items-center gap-2">
+                    <div className="w-5 h-5 rounded-full border-2 border-indigo-400 border-t-transparent animate-spin"></div>
+                    <span className="text-xs text-slate-400">Loading image...</span>
                 </div>
-            </div>
+            ) : (
+                <>
+                    <div className="w-9 h-9 rounded-lg bg-slate-800 text-slate-300 flex items-center justify-center text-lg mb-2">
+                        +
+                    </div>
+                    <span className="text-xs font-medium text-slate-200">
+                        Add variation
+                    </span>
+                    <span className="text-[11px] text-slate-500 mt-1">
+                        PNG, JPG or WebP
+                    </span>
+                </>
+            )}
         </div>
-    </div>
+    );
 }

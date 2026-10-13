@@ -1,30 +1,16 @@
 import nacl from "tweetnacl";
-import { PrismaClient } from "@prisma/client";
 import { Router } from "express";
 import jwt from "jsonwebtoken";
 import { workerMiddleware } from "../middleware";
 import { TOTAL_DECIMALS, WORKER_JWT_SECRET } from "../config";
-import { getNextTask } from "../db";
+import { getNextTask, prismaClient } from "../db";
 import { createSubmissionInput } from "../types";
 import { Connection, Keypair, PublicKey, SystemProgram, Transaction, sendAndConfirmTransaction } from "@solana/web3.js";
 import { privateKey } from "../privateKey";
 import { decode } from "bs58";
+
 const connection = new Connection(process.env.RPC_URL ?? "");
-
 const TOTAL_SUBMISSIONS = 100;
-
-const prismaClient = new PrismaClient();
-
-prismaClient.$transaction(
-    async (prisma) => {
-      // Code running in a transaction...
-    },
-    {
-      maxWait: 5000, // default: 2000
-      timeout: 10000, // default: 5000
-    }
-)
-
 const router = Router();
 
 router.post("/payout", workerMiddleware, async (req, res) => {
@@ -197,53 +183,73 @@ router.get("/nextTask", workerMiddleware, async (req, res) => {
 })
 
 router.post("/signin", async(req, res) => {
-    const { publicKey, signature } = req.body;
-    const message = new TextEncoder().encode("Sign into mechanical turks as a worker");
+    try {
+        const { publicKey, signature } = req.body;
+        const message = new TextEncoder().encode("Sign into mechanical turks as a worker");
 
-    const result = nacl.sign.detached.verify(
-        message,
-        new Uint8Array(signature.data),
-        new PublicKey(publicKey).toBytes(),
-    );
-
-    if (!result) {
-        return res.status(411).json({
-            message: "Incorrect signature"
-        })
-    }
-
-    const existingUser = await prismaClient.worker.findFirst({
-        where: {
-            address: publicKey
+        let signatureBytes: Uint8Array;
+        if (signature?.data) {
+            signatureBytes = new Uint8Array(signature.data);
+        } else if (Array.isArray(signature)) {
+            signatureBytes = new Uint8Array(signature);
+        } else {
+            signatureBytes = new Uint8Array(Object.values(signature));
         }
-    })
 
-    if (existingUser) {
-        const token = jwt.sign({
-            userId: existingUser.id
-        }, WORKER_JWT_SECRET)
+        let result = false;
+        try {
+            result = nacl.sign.detached.verify(
+                message,
+                signatureBytes,
+                new PublicKey(publicKey).toBytes(),
+            );
+        } catch (verifyErr) {
+            console.error("Worker signature verification error:", verifyErr);
+            return res.status(411).json({ message: "Invalid signature format" });
+        }
 
-        res.json({
-            token,
-            amount: existingUser.pending_amount / TOTAL_DECIMALS
-        })
-    } else {
-        const user = await prismaClient.worker.create({
-            data: {
-                address: publicKey,
-                pending_amount: 0,
-                locked_amount: 0
+        if (!result) {
+            return res.status(411).json({
+                message: "Incorrect signature"
+            });
+        }
+
+        const existingUser = await prismaClient.worker.findFirst({
+            where: {
+                address: publicKey
             }
         });
 
-        const token = jwt.sign({
-            userId: user.id
-        }, WORKER_JWT_SECRET)
+        if (existingUser) {
+            const token = jwt.sign({
+                userId: existingUser.id
+            }, WORKER_JWT_SECRET);
 
-        res.json({
-            token,
-            amount: 0
-        })
+            res.json({
+                token,
+                amount: existingUser.pending_amount / TOTAL_DECIMALS
+            });
+        } else {
+            const user = await prismaClient.worker.create({
+                data: {
+                    address: publicKey,
+                    pending_amount: 0,
+                    locked_amount: 0
+                }
+            });
+
+            const token = jwt.sign({
+                userId: user.id
+            }, WORKER_JWT_SECRET);
+
+            res.json({
+                token,
+                amount: 0
+            });
+        }
+    } catch (e) {
+        console.error("Worker signin error:", e);
+        res.status(500).json({ message: "Internal server error" });
     }
 });
 
